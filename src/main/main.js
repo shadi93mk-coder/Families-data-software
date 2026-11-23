@@ -1,10 +1,11 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { Store } = require('./store');
 const excel = require('./excel');
+const idcard = require('./idcard');
 
 // Keep data next to the program in "portable" mode, otherwise in the user's AppData folder.
 const portableDir = process.env.PORTABLE_EXECUTABLE_DIR;
@@ -34,10 +35,46 @@ function createWindow() {
     },
   });
   Menu.setApplicationMenu(null);
+  setupSerial(win.webContents.session);
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', e => e.preventDefault());
   if (process.env.FD_DEVTOOLS) win.webContents.openDevTools();
+}
+
+// USB barcode scanners in "virtual COM port" mode are read with the Web Serial API.
+let lastSerialPortId = null;
+function setupSerial(ses) {
+  const ALLOWED = new Set(['serial', 'clipboard-sanitized-write', 'clipboard-read']);
+  ses.setPermissionCheckHandler((_wc, permission) => ALLOWED.has(permission));
+  ses.setPermissionRequestHandler((_wc, permission, cb) => cb(ALLOWED.has(permission)));
+  ses.setDevicePermissionHandler(details => details.deviceType === 'serial');
+  ses.on('select-serial-port', (event, ports, _wc, callback) => {
+    event.preventDefault();
+    const label = p => `${p.displayName || ''} ${p.portName || ''} ${p.vendorId || ''}`;
+    const pick = ports.find(p => p.portId === lastSerialPortId)
+      || ports.find(p => /scan|barcode|honeywell|zebra|symbol|datalogic|newland|netum|eyoyo|tera|inateck|zkteco|sunmi/i.test(label(p)))
+      || ports.find(p => /usb/i.test(label(p)))
+      || ports[0];
+    if (pick) lastSerialPortId = pick.portId;
+    callback(pick ? pick.portId : '');
+  });
+}
+
+/** Renders an image file as RGBA at the given width (used for decoding the ID barcode from a photo). */
+function imageRenderer(file) {
+  const img = nativeImage.createFromPath(file);
+  if (img.isEmpty()) return null;
+  const { width } = img.getSize();
+  const render = w => {
+    const r = w === width ? img : img.resize({ width: Math.round(w), quality: 'best' });
+    const { width: rw, height: rh } = r.getSize();
+    const bgra = r.toBitmap();
+    const data = new Uint8ClampedArray(bgra.length);
+    for (let i = 0; i < bgra.length; i += 4) { data[i] = bgra[i + 2]; data[i + 1] = bgra[i + 1]; data[i + 2] = bgra[i]; data[i + 3] = 255; }
+    return { data, width: rw, height: rh };
+  };
+  return { render, width };
 }
 
 // Methods of Service that the UI may call directly (only while logged in).
@@ -155,6 +192,26 @@ function registerIpc() {
     const b = store.backups.list().find(x => x.name === name);
     if (!b) { const e = new Error('not_found'); e.code = 'not_found'; throw e; }
     return store.restore(fs.readFileSync(b.path));
+  }));
+
+  // ---------------- ID card
+  const notId = () => Object.assign(new Error('not_id_card'), { code: 'not_id_card' });
+  ipcMain.handle('id:parseText', wrap(text => { svc(); const r = idcard.parseScannedText(String(text || '')); if (!r) throw notId(); return r; }));
+  ipcMain.handle('id:parseBytes', wrap(bytes => { svc(); const r = idcard.parseBytes(bytes || []); if (!r) throw notId(); return r; }));
+  ipcMain.handle('id:fromImage', wrap(async () => {
+    svc().require('editor');
+    let file = process.env.FD_TEST_IMAGE;
+    if (!file) {
+      const r = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png'] }] });
+      if (r.canceled || !r.filePaths[0]) return null;
+      file = r.filePaths[0];
+    }
+    const img = imageRenderer(file);
+    if (!img) throw Object.assign(new Error('invalid_image'), { code: 'invalid_image' });
+    const res = await idcard.decodeImage(img.render, img.width);
+    if (!res) throw Object.assign(new Error('barcode_not_found'), { code: 'barcode_not_found' });
+    if (!res.fields) throw notId();
+    return res.fields;
   }));
 
   // ---------------- excel

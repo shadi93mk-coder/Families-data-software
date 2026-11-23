@@ -185,3 +185,8 @@ html[dir=rtl] #toast-root { transform: translateX(50%); }
   body.printing-key > *:not(.print-key) { display: none !important; }
   body.printing-key .print-key { display: block; padding: 30px; }
 }
+
+.scan-capture { width: 100%; min-height: 54px; font-family: Consolas, monospace; direction: ltr; border: 2px dashed var(--primary); background: var(--primary-soft); text-align: center; }
+.scan-capture:focus { outline: none; border-style: solid; }
+td input[type=text] { min-width: 110px; }
+td input[type=date] { min-width: 140px; }

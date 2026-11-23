@@ -11,6 +11,9 @@ const FAMILY_COLS = [
   { key: 'head_name', ar: 'اسم رب الأسرة', en: 'Head of family', hy: 'Ընտանիքի ղեկավար' },
   { key: 'head_national_id', ar: 'الرقم الوطني', en: 'National ID', hy: 'Անձնական համար' },
   { key: 'head_birth_date', ar: 'تاريخ الميلاد', en: 'Birth date', hy: 'Ծննդյան ամսաթիվ' },
+  { key: 'head_birth_place', ar: 'مكان الولادة', en: 'Birth place', hy: 'Ծննդավայր' },
+  { key: 'head_father_name', ar: 'اسم الأب', en: "Father's name", hy: 'Հոր անունը' },
+  { key: 'head_mother_name', ar: 'اسم الأم', en: "Mother's name", hy: 'Մոր անունը' },
   { key: 'head_gender', ar: 'الجنس', en: 'Gender', hy: 'Սեռ' },
   { key: 'phone', ar: 'الهاتف', en: 'Phone', hy: 'Հեռախոսահամար' },
   { key: 'area', ar: 'المنطقة', en: 'Area', hy: 'Շրջան' },
@@ -23,6 +26,9 @@ const MEMBER_COLS = [
   { key: 'full_name', ar: 'الاسم الكامل', en: 'Full name', hy: 'Անուն, ազգանուն' },
   { key: 'national_id', ar: 'الرقم الوطني', en: 'National ID', hy: 'Անձնական համար' },
   { key: 'birth_date', ar: 'تاريخ الميلاد', en: 'Birth date', hy: 'Ծննդյան ամսաթիվ' },
+  { key: 'birth_place', ar: 'مكان الولادة', en: 'Birth place', hy: 'Ծննդավայր' },
+  { key: 'father_name', ar: 'اسم الأب', en: "Father's name", hy: 'Հոր անունը' },
+  { key: 'mother_name', ar: 'اسم الأم', en: "Mother's name", hy: 'Մոր անունը' },
   { key: 'gender', ar: 'الجنس', en: 'Gender', hy: 'Սեռ' },
   { key: 'relation', ar: 'صلة القرابة', en: 'Relation', hy: 'Ազգակցական կապ' },
   { key: 'has_disability', ar: 'إعاقة', en: 'Disability', hy: 'Հաշմանդամություն' },
@@ -80,7 +86,8 @@ function familyRows(service, ids, lang) {
     const f = service.getFamily(id);
     const r = rowsById.get(id) || {};
     fam.push([
-      f.file_no, f.head_name, f.head_national_id, f.head_birth_date, genderLabel(f.head_gender, lang), f.phone, f.area, f.address, f.notes,
+      f.file_no, f.head_name, f.head_national_id, f.head_birth_date, f.head_birth_place, f.head_father_name, f.head_mother_name,
+      genderLabel(f.head_gender, lang), f.phone, f.area, f.address, f.notes,
       ...criteria.map(c => {
         const v = f.custom[c.key];
         if (v === undefined || v === null) return '';
@@ -91,7 +98,7 @@ function familyRows(service, ids, lang) {
       r.members_count, r.score,
     ]);
     for (const m of f.members) {
-      mem.push([f.file_no, m.full_name, m.national_id, m.birth_date, genderLabel(m.gender, lang), m.relation,
+      mem.push([f.file_no, m.full_name, m.national_id, m.birth_date, m.birth_place, m.father_name, m.mother_name, genderLabel(m.gender, lang), m.relation,
         yesLabel(m.has_disability, lang), yesLabel(m.chronic_illness, lang), m.occupation, m.notes]);
     }
   }

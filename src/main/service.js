@@ -323,20 +323,23 @@ class Service {
     const members = (f.members || []).filter(m => str(m.full_name));
     return this.db.tx(() => {
       const base = [str(f.head_name), str(f.head_national_id), str(f.head_birth_date), str(f.head_gender),
-        str(f.phone), str(f.area), str(f.address), str(f.notes), JSON.stringify(custom)];
+        str(f.phone), str(f.area), str(f.address), str(f.notes), JSON.stringify(custom),
+        str(f.head_father_name), str(f.head_mother_name), str(f.head_birth_place)];
       let id = f.id;
       if (id) {
         this.db.run(`UPDATE families SET file_no=?, head_name=?, head_national_id=?, head_birth_date=?, head_gender=?, phone=?, area=?, address=?, notes=?, custom=?,
-          updated_at=datetime('now','localtime') WHERE id=?`, [fileNo || this.nextFileNo(), ...base, id]);
+          head_father_name=?, head_mother_name=?, head_birth_place=?, updated_at=datetime('now','localtime') WHERE id=?`, [fileNo || this.nextFileNo(), ...base, id]);
         this.db.run('DELETE FROM members WHERE family_id = ?', [id]);
       } else {
-        id = this.db.run(`INSERT INTO families(file_no, head_name, head_national_id, head_birth_date, head_gender, phone, area, address, notes, custom, created_by)
-          VALUES(?,?,?,?,?,?,?,?,?,?,?)`, [fileNo || this.nextFileNo(), ...base, this.user.username]).id;
+        id = this.db.run(`INSERT INTO families(file_no, head_name, head_national_id, head_birth_date, head_gender, phone, area, address, notes, custom,
+          head_father_name, head_mother_name, head_birth_place, created_by)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [fileNo || this.nextFileNo(), ...base, this.user.username]).id;
       }
       for (const m of members) {
-        this.db.run(`INSERT INTO members(family_id, full_name, national_id, birth_date, gender, relation, has_disability, chronic_illness, occupation, notes)
-          VALUES(?,?,?,?,?,?,?,?,?,?)`, [id, str(m.full_name), str(m.national_id), str(m.birth_date), str(m.gender), str(m.relation),
-          m.has_disability ? 1 : 0, m.chronic_illness ? 1 : 0, str(m.occupation), str(m.notes)]);
+        this.db.run(`INSERT INTO members(family_id, full_name, national_id, birth_date, gender, relation, has_disability, chronic_illness, occupation, notes,
+          father_name, mother_name, birth_place)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, [id, str(m.full_name), str(m.national_id), str(m.birth_date), str(m.gender), str(m.relation),
+          m.has_disability ? 1 : 0, m.chronic_illness ? 1 : 0, str(m.occupation), str(m.notes), str(m.father_name), str(m.mother_name), str(m.birth_place)]);
       }
       this.audit(f.id ? 'update' : 'create', 'family', id, f.head_name);
       return id;
@@ -413,6 +416,9 @@ class Service {
       { id: 'file_no', type: 'text', i18n: 'f.file_no' },
       { id: 'head_name', type: 'text', i18n: 'f.head_name' },
       { id: 'head_national_id', type: 'text', i18n: 'f.head_national_id' },
+      { id: 'head_father_name', type: 'text', i18n: 'f.head_father_name' },
+      { id: 'head_mother_name', type: 'text', i18n: 'f.head_mother_name' },
+      { id: 'head_birth_place', type: 'text', i18n: 'f.head_birth_place' },
       { id: 'phone', type: 'text', i18n: 'f.phone' },
       { id: 'area', type: 'text', i18n: 'f.area' },
       { id: 'address', type: 'text', i18n: 'f.address' },
@@ -497,6 +503,9 @@ class Service {
         head_national_id: f.head_national_id,
         head_birth_date: f.head_birth_date,
         head_gender: f.head_gender,
+        head_father_name: f.head_father_name,
+        head_mother_name: f.head_mother_name,
+        head_birth_place: f.head_birth_place,
         phone: f.phone,
         area: f.area,
         address: f.address,
@@ -536,7 +545,7 @@ class Service {
     let rows = this.buildRows(filter.status === 'archived' ? 'archived' : 'active');
     const q = str(filter.search).toLowerCase();
     if (q) {
-      rows = rows.filter(r => [r.file_no, r.head_name, r.head_national_id, r.phone, r.area, r.address]
+      rows = rows.filter(r => [r.file_no, r.head_name, r.head_national_id, r.phone, r.area, r.address, r.head_father_name, r.head_mother_name]
         .some(v => v && String(v).toLowerCase().includes(q)));
     }
     const conds = (filter.conditions || []).filter(c => c && c.field && c.op && fields.has(c.field));

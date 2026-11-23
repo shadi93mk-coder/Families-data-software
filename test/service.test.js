@@ -113,3 +113,14 @@ test('excel round trip', async () => {
   const r2 = excel.importFamilies(s, xfile);
   assert.strictEqual(r2.updated, 1);
 });
+
+test('ID card fields are stored for head and members', async () => {
+  const { s } = await setup();
+  const fid = s.saveFamily({ head_name: 'سامر الأحمد', head_father_name: 'خالد', head_mother_name: 'ليلى', head_birth_place: 'دمشق',
+    members: [{ full_name: 'ريم', father_name: 'سامر', mother_name: 'هبة', birth_place: 'حلب' }] });
+  const f = s.getFamily(fid);
+  assert.deepStrictEqual([f.head_father_name, f.head_mother_name, f.head_birth_place], ['خالد', 'ليلى', 'دمشق']);
+  assert.deepStrictEqual([f.members[0].father_name, f.members[0].mother_name, f.members[0].birth_place], ['سامر', 'هبة', 'حلب']);
+  assert.strictEqual(s.searchFamilies({ search: 'ليلى' }).length, 1);
+  assert.strictEqual(s.searchFamilies({ conditions: [{ field: 'head_birth_place', op: 'equals', value: 'دمشق' }] }).length, 1);
+});

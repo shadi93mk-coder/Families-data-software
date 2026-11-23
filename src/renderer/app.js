@@ -653,7 +653,8 @@
     const criteria = await api('listCriteria', false);
     const fam = id ? await api('getFamily', id) : { head_name: '', custom: {}, members: [], distributions: [] };
     const nextNo = id ? null : await api('nextFileNo');
-    const f = JSON.parse(JSON.stringify(fam));
+    const f = state.params.draft || JSON.parse(JSON.stringify(fam));
+    delete state.params.draft;
     const markDirty = () => { state.dirty = true; };
 
     const inp = (key, type = 'text') => h('input', { type, value: f[key] || '', disabled: readOnly, oninput: e => { f[key] = e.target.value; markDirty(); } });
@@ -675,7 +676,26 @@
     const title = id ? `${t(readOnly ? 'family.view' : 'family.edit')} — #${fam.file_no}` : t('family.new');
     const saveBtn = readOnly ? null : h('button', { class: 'btn primary', onclick: save }, '💾 ', t('save'));
     main.appendChild(pageHead(title,
-      readOnly ? null : h('button', { class: 'btn', onclick: () => toast(t('family.scan_id_soon')) }, '🪪 ', t('family.scan_id'), ' ', h('span', { class: 'badge' }, t('coming_soon'))),
+      readOnly ? null : h('button', {
+        class: 'btn', onclick: async () => {
+          const r = await scanIdDialog();
+          if (!r) return;
+          const d = r.fields;
+          if (r.target === 'head') {
+            Object.assign(f, {
+              head_name: d.full_name, head_national_id: d.national_id, head_birth_date: d.birth_date || f.head_birth_date,
+              head_father_name: d.father_name, head_mother_name: d.mother_name, head_birth_place: d.birth_place,
+            });
+          } else {
+            f.members.push({ full_name: d.full_name, national_id: d.national_id, birth_date: d.birth_date, father_name: d.father_name,
+              mother_name: d.mother_name, birth_place: d.birth_place, has_disability: false, chronic_illness: false });
+          }
+          state.dirty = true;
+          state.params = { ...state.params, draft: f };
+          toast(t('id.filled'), 'ok');
+          renderShell();
+        },
+      }, '🪪 ', t('family.scan_id')),
       id && !readOnly ? h('button', { class: 'btn danger', onclick: () => archiveDialog(id) }, '🗄 ', t('family.archive')) : null,
       h('button', { class: 'btn', onclick: () => navigate('families') }, t('cancel')),
       saveBtn));
@@ -692,6 +712,9 @@
         field(t('f.head_name'), inp('head_name'), true),
         field(t('f.head_national_id'), nidInput),
         field(t('f.head_birth_date'), inp('head_birth_date', 'date')),
+        field(t('f.head_birth_place'), inp('head_birth_place')),
+        field(t('f.head_father_name'), inp('head_father_name')),
+        field(t('f.head_mother_name'), inp('head_mother_name')),
         field(t('f.head_gender'), genderSel(f.head_gender, v => { f.head_gender = v; })),
         field(t('f.phone'), inp('phone')),
         field(t('f.area'), inp('area')),
@@ -715,7 +738,7 @@
     function renderMembers() {
       clear(memWrap);
       const thead = h('thead', null, h('tr', null,
-        ['m.full_name', 'm.national_id', 'm.birth_date', 'm.age', 'm.gender', 'm.relation', 'm.has_disability', 'm.chronic_illness', 'm.occupation'].map(k => h('th', null, t(k))), h('th', null, '')));
+        ['m.full_name', 'm.national_id', 'm.birth_date', 'm.age', 'm.gender', 'm.relation', 'm.has_disability', 'm.chronic_illness', 'm.occupation', 'm.father_name', 'm.mother_name', 'm.birth_place'].map(k => h('th', null, t(k))), h('th', null, '')));
       const tbody = h('tbody', null, f.members.map((m, i) => {
         const txt = (k, type = 'text') => h('input', { type, value: m[k] || '', disabled: readOnly, oninput: e => { m[k] = e.target.value; markDirty(); if (k === 'birth_date') ageCell.textContent = ageOf(m[k]); } });
         const chk = k => h('input', { type: 'checkbox', checked: m[k], disabled: readOnly, onchange: e => { m[k] = e.target.checked; markDirty(); } });
@@ -728,6 +751,7 @@
           h('td', null, h('select', { disabled: readOnly, onchange: e => { m.relation = e.target.value; markDirty(); } }, h('option', { value: '' }, '—'),
             RELATIONS.map(r => h('option', { value: r, selected: m.relation === r }, t(`rel.${r}`))))),
           h('td', null, chk('has_disability')), h('td', null, chk('chronic_illness')), h('td', null, txt('occupation')),
+          h('td', null, txt('father_name')), h('td', null, txt('mother_name')), h('td', null, txt('birth_place')),
           h('td', null, readOnly ? null : h('button', { class: 'btn small danger', onclick: () => { f.members.splice(i, 1); markDirty(); renderMembers(); } }, '✕')));
       }));
       memWrap.appendChild(h('table', null, thead, tbody));
@@ -764,6 +788,129 @@
 
     // Ctrl+S saves
     main.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && saveBtn) { e.preventDefault(); save(); } });
+  }
+
+  // ---------------------------------------------------------------- ID card reading
+  // Scanner in COM mode: kept connected while the program runs.
+  const serial = { port: null, handler: null };
+
+  async function serialConnect() {
+    if (!('serial' in navigator)) throw { code: 'serial_unsupported' };
+    if (serial.port) return;
+    const granted = await navigator.serial.getPorts();
+    const port = granted[0] || await navigator.serial.requestPort();
+    await port.open({ baudRate: 9600 });
+    serial.port = port;
+    serialReadLoop(port);
+  }
+
+  async function serialReadLoop(port) {
+    let buf = []; let timer = null;
+    try {
+      while (port.readable) {
+        const reader = port.readable.getReader();
+        try {
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            for (const b of value) buf.push(b);
+            clearTimeout(timer);
+            // a scan arrives in several chunks: wait for a short pause, then parse everything
+            timer = setTimeout(() => { const bytes = buf; buf = []; if (serial.handler) serial.handler(bytes); }, 250);
+          }
+        } finally { reader.releaseLock(); }
+      }
+    } catch (_) { /* unplugged */ }
+    serial.port = null;
+    try { await port.close(); } catch (_) { /* ignore */ }
+  }
+
+  function scanIdDialog() {
+    return new Promise(resolve => {
+      let result = null;
+      const resultBox = h('div');
+      const status = h('div', { class: 'muted small', style: { minHeight: '18px' } });
+      const capture = h('textarea', { class: 'scan-capture', placeholder: t('id.waiting'), rows: 2, spellcheck: 'false' });
+      let timer = null;
+
+      async function handle(promise) {
+        status.textContent = t('id.reading');
+        try {
+          const fields = await promise;
+          if (!fields) { status.textContent = ''; return; }
+          result = fields;
+          status.textContent = '';
+          showResult(fields);
+        } catch (e) {
+          status.textContent = '';
+          toast(errText(e), 'error');
+        }
+      }
+
+      async function showResult(d) {
+        clear(resultBox);
+        const dups = await safe(() => api('findByNationalId', d.national_id, state.params.id || 0)) || [];
+        const row = (k, v) => h('tr', null, h('th', { style: { width: '35%' } }, t(k)), h('td', null, v || '—'));
+        resultBox.appendChild(h('div', { class: 'panel', style: { marginTop: '12px', marginBottom: 0 } },
+          h('h3', null, '✅ ', t('id.result')),
+          dups.length ? h('div', { class: 'alert warn' }, t('family.dup_warning'), ' ', dups.map(x => `#${x.file_no} ${x.head_name}`).join(' · ')) : null,
+          h('table', null, h('tbody', null,
+            row('id.first_name', d.first_name), row('id.family_name', d.family_name), row('f.head_father_name', d.father_name),
+            row('f.head_mother_name', d.mother_name), row('f.head_birth_place', d.birth_place), row('f.head_birth_date', d.birth_date),
+            row('f.head_national_id', d.national_id)))));
+        footer.classList.remove('hidden');
+      }
+
+      capture.addEventListener('input', () => {
+        clearTimeout(timer);
+        // scanners "type" very fast; parse after a short pause
+        timer = setTimeout(() => {
+          const text = capture.value;
+          capture.value = '';
+          if (text.replace(/\s/g, '').length < 15) return;
+          handle(call('id:parseText', text));
+        }, 300);
+      });
+
+      const comStatus = h('span', { class: 'muted small' }, serial.port ? '🟢 ' + t('id.com_connected') : '');
+      serial.handler = bytes => handle(call('id:parseBytes', bytes));
+
+      const body = h('div', null,
+        h('div', { class: 'panel', style: { marginBottom: '10px' } },
+          h('h3', null, '🔫 ', t('id.scanner')),
+          h('p', { class: 'muted small', style: { marginTop: 0 } }, t('id.scanner_hint')),
+          capture,
+          h('div', { class: 'toolbar', style: { marginTop: '8px' } },
+            h('span', { class: 'small' }, t('id.com'), ':'),
+            h('button', {
+              class: 'btn small', onclick: async () => {
+                try { await serialConnect(); comStatus.textContent = '🟢 ' + t('id.com_connected'); } catch (e) { if (e && e.name !== 'NotFoundError') toast(t('err.serial_unsupported'), 'error'); }
+                capture.focus();
+              },
+            }, t('id.com_connect')), comStatus),
+          h('div', { class: 'muted small' }, t('id.com_help'))),
+        h('div', { class: 'panel', style: { marginBottom: 0 } },
+          h('h3', null, '📷 ', t('id.photo')),
+          h('p', { class: 'muted small', style: { marginTop: 0 } }, t('id.photo_hint')),
+          h('button', { class: 'btn', onclick: () => handle(call('id:fromImage')) }, '🖼 ', t('id.photo_btn'))),
+        status,
+        resultBox);
+
+      const done = v => { bg.remove(); serial.handler = null; document.removeEventListener('keydown', onKey); resolve(v); };
+      const onKey = e => { if (e.key === 'Escape') done(null); };
+      const footer = h('footer', { class: 'hidden' },
+        h('button', { class: 'btn', onclick: () => { result = null; clear(resultBox); footer.classList.add('hidden'); capture.focus(); } }, t('id.again')),
+        h('button', { class: 'btn', onclick: () => done({ target: 'member', fields: result }) }, '+ ', t('id.add_member')),
+        h('button', { class: 'btn primary', onclick: () => done({ target: 'head', fields: result }) }, t('id.fill_head')));
+      const bg = h('div', { class: 'modal-bg' }, h('div', { class: 'modal wide' },
+        h('header', null, h('div', { class: 'toolbar', style: { justifyContent: 'space-between' } }, t('id.title'), h('button', { class: 'btn small', onclick: () => done(null) }, '✕'))),
+        h('div', { class: 'body' }, body), footer));
+      document.getElementById('modal-root').appendChild(bg);
+      document.addEventListener('keydown', onKey);
+      // keep the capture box focused so a keyboard-mode scanner always types into it
+      bg.addEventListener('click', e => { if (!e.target.closest('button, input, select, a')) capture.focus(); });
+      capture.focus();
+    });
   }
 
   async function archiveDialog(id) {

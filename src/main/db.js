@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const initSqlJs = require('sql.js');
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
@@ -112,6 +112,12 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 `;
 
+// columns added in v0.3 (ID card fields)
+const ADDED_COLUMNS = {
+  families: [['head_father_name', 'TEXT'], ['head_mother_name', 'TEXT'], ['head_birth_place', 'TEXT']],
+  members: [['father_name', 'TEXT'], ['mother_name', 'TEXT'], ['birth_place', 'TEXT']],
+};
+
 const REQUIRED_TABLES = ['users', 'families', 'members', 'criteria', 'aid_types', 'distributions'];
 
 let SQL = null;
@@ -144,6 +150,7 @@ class Database {
     this.db = plainBytes ? new SQL.Database(plainBytes) : new SQL.Database();
     this.db.run('PRAGMA foreign_keys = ON;');
     this.db.run(SCHEMA);
+    this.ensureColumns();
     this.set('schema_version', String(SCHEMA_VERSION));
     this.save();
     return this;
@@ -151,6 +158,14 @@ class Database {
 
   close() {
     if (this.db) { this.save(); this.db.close(); this.db = null; }
+  }
+
+  /** Adds columns introduced after the first version (older files lack them). */
+  ensureColumns() {
+    for (const [table, cols] of Object.entries(ADDED_COLUMNS)) {
+      const have = new Set(this.db.exec(`PRAGMA table_info(${table})`)[0].values.map(v => v[1]));
+      for (const [name, def] of cols) if (!have.has(name)) this.db.run(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`);
+    }
   }
 
   /** Bytes exactly as stored on disk (encrypted when a codec is set). */
