@@ -176,3 +176,12 @@ html[dir=rtl] #toast-root { transform: translateX(50%); }
   tr { page-break-inside: avoid; }
   body { background: #fff; }
 }
+
+/* ---------- recovery key */
+.recovery-key { font-family: Consolas, "Courier New", monospace; font-size: 20px; letter-spacing: 1px; direction: ltr; text-align: center;
+  background: #f4f6f9; border: 2px dashed var(--primary); border-radius: 8px; padding: 14px; margin: 14px 0; word-break: break-all; user-select: all; }
+.print-key { display: none; }
+@media print {
+  body.printing-key > *:not(.print-key) { display: none !important; }
+  body.printing-key .print-key { display: block; padding: 30px; }
+}

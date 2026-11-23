@@ -125,20 +125,23 @@ async function loadSql() {
 }
 
 class Database {
-  constructor(file) {
+  /**
+   * @param {string} file  path of the database file on disk
+   * @param {{encode: (plain: Buffer) => Buffer}} [codec]  transforms the SQLite bytes before writing (encryption)
+   */
+  constructor(file, codec) {
     this.file = file;
+    this.codec = codec || null;
     this.db = null;
     this.inTx = 0;
   }
 
-  async open() {
+  /** Opens from the given (already decrypted) SQLite bytes, or an empty database when null. */
+  async open(plainBytes) {
     await loadSql();
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
-    if (fs.existsSync(this.file)) {
-      this.db = new SQL.Database(fs.readFileSync(this.file));
-    } else {
-      this.db = new SQL.Database();
-    }
+    if (plainBytes === undefined && !this.codec && fs.existsSync(this.file)) plainBytes = fs.readFileSync(this.file);
+    this.db = plainBytes ? new SQL.Database(plainBytes) : new SQL.Database();
     this.db.run('PRAGMA foreign_keys = ON;');
     this.db.run(SCHEMA);
     this.set('schema_version', String(SCHEMA_VERSION));
@@ -150,9 +153,19 @@ class Database {
     if (this.db) { this.save(); this.db.close(); this.db = null; }
   }
 
+  /** Bytes exactly as stored on disk (encrypted when a codec is set). */
+  fileBytes() {
+    const plain = Buffer.from(this.db.export());
+    this.db.run('PRAGMA foreign_keys = ON;');
+    return this.codec ? this.codec.encode(plain) : plain;
+  }
+
+  get isOpen() { return !!this.db; }
+
   save() {
     if (!this.db || this.inTx) return;
-    const data = Buffer.from(this.db.export());
+    const plain = Buffer.from(this.db.export());
+    const data = this.codec ? this.codec.encode(plain) : plain;
     const tmp = this.file + '.tmp';
     fs.writeFileSync(tmp, data);
     fs.renameSync(tmp, this.file);
@@ -208,17 +221,14 @@ class Database {
     this.save();
   }
 
-  exportBytes() {
-    return Buffer.from(this.db.export());
-  }
 }
 
 /** Checks that a file is a valid database of this program. Returns null if OK, or an error code. */
-async function validateDbFile(file) {
+async function validateDbFile(fileOrBytes) {
   await loadSql();
   let db;
   try {
-    db = new SQL.Database(fs.readFileSync(file));
+    db = new SQL.Database(Buffer.isBuffer(fileOrBytes) ? fileOrBytes : fs.readFileSync(fileOrBytes));
     const tables = db.exec("SELECT name FROM sqlite_master WHERE type='table'");
     const names = tables.length ? tables[0].values.map(v => v[0]) : [];
     for (const t of REQUIRED_TABLES) if (!names.includes(t)) return 'not_our_backup';

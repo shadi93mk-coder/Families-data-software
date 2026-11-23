@@ -1,7 +1,7 @@
 {
   "name": "families-data",
   "productName": "Families Data",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Offline family data management and aid distribution (Arabic / English / Armenian)",
   "main": "src/main/main.js",
   "scripts": {

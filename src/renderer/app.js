@@ -64,7 +64,7 @@
     return new Promise(resolve => {
       const root = document.getElementById('modal-root');
       const close = v => { bg.remove(); document.removeEventListener('keydown', onKey); resolve(v); };
-      const onKey = e => { if (e.key === 'Escape') close(null); };
+      const onKey = e => { if (e.key === 'Escape' && !opts.noEscape) close(null); };
       document.addEventListener('keydown', onKey);
       const footer = h('footer', null, (buttons || [{ label: t('close'), value: null }]).map(b =>
         h('button', {
@@ -178,6 +178,12 @@
             const ok = await changePasswordDialog(true);
             if (!ok) { await api('logout'); state.user = null; return renderLogin(); }
           }
+          if (state.user.recovery_key) await showRecoveryKey(state.user.recovery_key);
+          if (state.user.migrated) {
+            await modal(t('enc.title'), h('div', null,
+              h('div', { class: 'alert info' }, t('enc.migrated')),
+              state.user.pending_reset && state.user.pending_reset.length ? h('div', { class: 'alert warn' }, t('enc.pending', { names: state.user.pending_reset.join('، ') })) : null));
+          }
           state.view = 'dashboard';
           renderShell();
         } catch (r) {
@@ -191,7 +197,8 @@
     err,
     field(t('username'), user),
     field(t('password'), pass),
-    h('button', { class: 'btn primary', type: 'submit', style: { justifyContent: 'center', padding: '10px' } }, t('sign_in')));
+    h('button', { class: 'btn primary', type: 'submit', style: { justifyContent: 'center', padding: '10px' } }, t('sign_in')),
+    h('button', { class: 'btn link', type: 'button', onclick: () => recoverDialog() }, t('rec.forgot')));
 
     app.appendChild(h('div', { class: 'login-wrap' },
       h('div', { class: 'login-card' },
@@ -201,6 +208,61 @@
         h('div', { class: 'langs' }, Object.entries(I18N.LANG_NAMES).map(([k, n]) =>
           h('button', { type: 'button', class: I18N.lang === k ? 'active' : '', onclick: () => setLang(k) }, n))))));
     user.focus();
+  }
+
+  async function showRecoveryKey(key) {
+    const check = h('input', { type: 'checkbox' });
+    const keyBox = h('div', { class: 'recovery-key', id: 'recovery-key-text' }, key);
+    const body = h('div', null,
+      h('div', { class: 'alert warn' }, t('rec.explain')),
+      keyBox,
+      h('div', { class: 'toolbar', style: { justifyContent: 'center', marginBottom: '14px' } },
+        h('button', { class: 'btn', onclick: async () => { try { await navigator.clipboard.writeText(key); toast(t('rec.copied'), 'ok'); } catch (_) { /* ignore */ } } }, '📋 ', t('rec.copy')),
+        h('button', { class: 'btn', onclick: () => safe(() => call('auth:saveRecoveryFile', key)) }, '💾 ', t('rec.save_file')),
+        h('button', {
+          class: 'btn', onclick: () => {
+            const area = h('div', { class: 'print-key' }, h('h2', null, `${t('app_title')} — ${t('rec.title')}`), h('div', { class: 'recovery-key' }, key), h('p', null, t('rec.explain')), h('p', null, todayStr()));
+            document.body.appendChild(area); document.body.classList.add('printing-key');
+            setTimeout(() => { window.print(); document.body.classList.remove('printing-key'); area.remove(); }, 50);
+          },
+        }, '🖨 ', t('print'))),
+      h('label', { class: 'check' }, check, t('rec.saved_check')));
+    await modal(t('rec.title'), body, [{
+      label: t('confirm'), kind: 'primary', onClick: async () => {
+        if (!check.checked) { check.parentElement.style.color = 'var(--danger)'; return false; }
+        await safe(() => call('auth:confirmRecovery'));
+        return true;
+      },
+    }], { noEscape: true });
+  }
+
+  async function recoverDialog() {
+    const key = h('input', { type: 'text', placeholder: 'XXXXX-XXXXX-…', style: { fontFamily: 'monospace', direction: 'ltr' } });
+    const user = h('input', { type: 'text', value: 'admin' });
+    const newP = h('input', { type: 'password' });
+    const conf = h('input', { type: 'password' });
+    const r = await modal(t('rec.forgot'), h('div', { class: 'grid' },
+      field(t('rec.enter_key'), key, true), field(t('rec.reset_for'), user, true),
+      field(t('user.new_password'), newP, true), field(t('user.confirm_password'), conf, true)), [
+      { label: t('cancel'), value: null },
+      {
+        label: t('save'), kind: 'primary', onClick: async () => {
+          if (newP.value !== conf.value) { toast(t('err.passwords_mismatch'), 'error'); return false; }
+          const u = await safe(() => call('auth:recover', key.value, user.value, newP.value));
+          return u || false;
+        },
+      },
+    ]);
+    if (r) {
+      toast(t('rec.done'), 'ok');
+      state.user = r;
+      if (r.role === 'admin') {
+        const k = await safe(() => call('auth:newRecoveryKey'));
+        if (k) await showRecoveryKey(k);
+      }
+      state.view = 'dashboard';
+      renderShell();
+    }
   }
 
   async function changePasswordDialog(forced) {
@@ -879,7 +941,8 @@
     main.appendChild(h('div', { class: 'table-wrap' }, h('table', null,
       h('thead', null, h('tr', null, h('th', null, t('username')), h('th', null, t('user.full_name')), h('th', null, t('user.role')), h('th', null, t('active')), h('th', null, ''))),
       h('tbody', null, list.map(u => h('tr', null, h('td', null, u.username), h('td', null, u.full_name || ''), h('td', null, t(`role.${u.role}`)),
-        h('td', null, h('span', { class: `badge ${u.active ? 'ok' : ''}` }, u.active ? t('active') : t('inactive'))),
+        h('td', null, h('span', { class: `badge ${u.active ? 'ok' : ''}` }, u.active ? t('active') : t('inactive')),
+          u.needs_reset ? [' ', h('span', { class: 'badge warn' }, t('user.needs_reset'))] : null),
         h('td', null, h('div', { class: 'toolbar' },
           h('button', { class: 'btn small', onclick: () => editUser({ ...u, active: !!u.active }) }, t('edit')),
           u.id !== state.user.id ? h('button', { class: 'btn small danger', onclick: async () => { if (await confirmDialog(t('are_you_sure'), true) && await safe(() => api('deleteUser', u.id))) renderShell(); } }, t('delete')) : null))))))));
@@ -933,7 +996,7 @@
     async function restore(fn) {
       if (!(await confirmDialog(t('backup.import_warn'), true))) return;
       const r = await safe(fn);
-      if (r) { state.user = null; state.dirty = false; renderLogin(t('backup.restored')); }
+      if (r) { state.user = null; state.dirty = false; renderLogin(r.encrypted && !r.sameKey ? t('backup.restored_other') : t('backup.restored')); }
     }
   }
 
@@ -956,9 +1019,19 @@
           if (ok) { state.settings = await call('settings:get'); toast(t('saved'), 'ok'); renderShell(); }
         },
       }, t('save')))));
+    main.appendChild(h('div', { class: 'panel', style: { maxWidth: '760px' } }, h('h3', null, '🔒 ', t('enc.title')),
+      h('div', { class: 'alert info' }, t('enc.status_on')),
+      h('div', { class: 'alert warn' }, t('enc.excel_warn')),
+      h('button', {
+        class: 'btn', onclick: async () => {
+          if (!(await confirmDialog(t('rec.new_key_warn'), true))) return;
+          const k = await safe(() => call('auth:newRecoveryKey'));
+          if (k) showRecoveryKey(k);
+        },
+      }, '🔑 ', t('rec.new_key'))));
     main.appendChild(h('div', { class: 'panel small muted' },
       h('div', null, `${t('settings.version')}: ${info.version}`),
-      h('div', null, `${t('settings.data_dir')}: ${info.dataDir}`)));
+      h('div', null, `${t('settings.data_dir')}: `, h('span', { dir: 'ltr' }, info.dataDir))));
   }
 
   // ================================================================ audit

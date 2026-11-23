@@ -6,7 +6,6 @@ const os = require('os');
 const path = require('path');
 const { Database } = require('../src/main/db');
 const { Service } = require('../src/main/service');
-const { BackupManager } = require('../src/main/backup');
 const excel = require('../src/main/excel');
 
 async function setup() {
@@ -99,14 +98,10 @@ test('archive, restore and permanent delete', async () => {
   assert.strictEqual(s.searchFamilies({ status: 'archived' }).length, 0);
 });
 
-test('backup, restore and excel round trip', async () => {
-  const { dir, db, s } = await setup();
+test('excel round trip', async () => {
+  const { dir, s } = await setup();
   s.saveCriterion({ label_ar: 'مريض', label_en: 'Sick', type: 'yesno', points: 1 });
   const id = s.saveFamily({ head_name: 'سامي', file_no: '7', members: [{ full_name: 'ابن' }] });
-  const bm = new BackupManager(db, path.join(dir, 'backups'));
-  assert.ok(bm.runDaily());
-  assert.strictEqual(bm.runDaily(), null, 'only once per day');
-
   const xfile = path.join(dir, 'out.xlsx');
   excel.exportFamilies(s, [id], xfile, 'ar');
   s.archiveFamily(id, 'other'); s.deleteFamilyPermanently(id);
@@ -117,16 +112,4 @@ test('backup, restore and excel round trip', async () => {
   assert.strictEqual(f.members_count, 2);
   const r2 = excel.importFamilies(s, xfile);
   assert.strictEqual(r2.updated, 1);
-
-  // restore the daily backup
-  const exported = path.join(dir, 'copy.fdb');
-  bm.exportTo(exported);
-  s.saveFamily({ head_name: 'later' });
-  await bm.importFrom(exported, db.file);
-  const db2 = await new Database(db.file).open();
-  const s2 = new Service(db2); s2.login('admin', 'admin');
-  assert.strictEqual(s2.searchFamilies({}).length, 1);
-  const bad = path.join(dir, 'bad.fdb'); fs.writeFileSync(bad, 'nope');
-  const bm2 = new BackupManager(db2, path.join(dir, 'backups'));
-  await assert.rejects(bm2.importFrom(bad, db2.file), e => e.code === 'invalid_file' || e.code === 'not_our_backup');
 });

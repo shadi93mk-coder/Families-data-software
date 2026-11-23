@@ -41,9 +41,16 @@ function parseJSON(s, def) { try { return s ? JSON.parse(s) : def; } catch (_) {
 function str(v) { return v === undefined || v === null ? '' : String(v).trim(); }
 
 class Service {
-  constructor(db) {
+  constructor(db, hooks) {
     this.db = db;
     this.user = null;
+    // hooks keep the encryption key-wraps in sync with user passwords:
+    // onPassword(username, password), onUserRenamed(oldName, newName), onUserDeleted(username)
+    this.hooks = hooks || {};
+  }
+
+  hook(name, ...args) {
+    if (this.hooks[name]) this.hooks[name](...args);
   }
 
   // ---------------------------------------------------------------- setup
@@ -76,6 +83,19 @@ class Service {
     return this.user;
   }
 
+  /** Used by recovery: sets a new password for a user without knowing the old one. */
+  resetPasswordForRecovery(username, newPw) {
+    if (String(newPw || '').length < 6) throw new AppError('password_too_short');
+    const u = this.db.get('SELECT * FROM users WHERE username = ? AND active = 1', [str(username)]);
+    if (!u) throw new AppError('user_not_found');
+    this.db.run('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?', [bcrypt.hashSync(newPw, 10), u.id]);
+    this.hook('onPassword', u.username, newPw);
+    this.db.save();
+    this.user = { id: u.id, username: u.username, full_name: u.full_name, role: u.role, must_change_password: false };
+    this.audit('recovery_reset', 'user', u.id);
+    return this.user;
+  }
+
   logout() {
     if (this.user) this.audit('logout', 'user', this.user.id);
     this.user = null;
@@ -95,6 +115,8 @@ class Service {
     if (!bcrypt.compareSync(String(oldPw || ''), u.password_hash)) throw new AppError('wrong_password');
     if (String(newPw || '').length < 6) throw new AppError('password_too_short');
     this.db.run('UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?', [bcrypt.hashSync(newPw, 10), u.id]);
+    this.hook('onPassword', u.username, newPw);
+    this.db.save();
     this.user.must_change_password = false;
     this.audit('change_password', 'user', u.id);
     return true;
@@ -102,7 +124,9 @@ class Service {
 
   listUsers() {
     this.require('admin');
-    return this.db.all('SELECT id, username, full_name, role, active, created_at FROM users ORDER BY id');
+    const rows = this.db.all('SELECT id, username, full_name, role, active, created_at FROM users ORDER BY id');
+    const has = this.hooks.hasKey;
+    return rows.map(r => ({ ...r, needs_reset: has ? !has(r.username) : false }));
   }
 
   saveUser(u) {
@@ -114,18 +138,28 @@ class Service {
     if (dup) throw new AppError('username_exists');
     if (u.id) {
       if (u.id === this.user.id && (u.role !== 'admin' || !u.active)) throw new AppError('cannot_demote_self');
+      if (u.password && String(u.password).length < 6) throw new AppError('password_too_short');
+      const old = this.db.get('SELECT username FROM users WHERE id = ?', [u.id]);
+      if (!old) throw new AppError('not_found');
       this.db.run('UPDATE users SET username=?, full_name=?, role=?, active=? WHERE id=?',
         [username, str(u.full_name), u.role, u.active ? 1 : 0, u.id]);
-      if (u.password) {
-        if (String(u.password).length < 6) throw new AppError('password_too_short');
-        this.db.run('UPDATE users SET password_hash=?, must_change_password=1 WHERE id=?', [bcrypt.hashSync(u.password, 10), u.id]);
+      if (old.username !== username) {
+        this.hook('onUserRenamed', old.username, username);
+        if (u.id === this.user.id) this.user.username = username;
       }
+      if (u.password) {
+        this.db.run('UPDATE users SET password_hash=?, must_change_password=1 WHERE id=?', [bcrypt.hashSync(u.password, 10), u.id]);
+        this.hook('onPassword', username, u.password);
+      }
+      this.db.save();
       this.audit('update', 'user', u.id, username);
       return u.id;
     }
     if (String(u.password || '').length < 6) throw new AppError('password_too_short');
     const r = this.db.run('INSERT INTO users(username, full_name, password_hash, role, active, must_change_password) VALUES(?,?,?,?,?,1)',
       [username, str(u.full_name), bcrypt.hashSync(u.password, 10), u.role, u.active === false ? 0 : 1]);
+    this.hook('onPassword', username, u.password);
+    this.db.save();
     this.audit('create', 'user', r.id, username);
     return r.id;
   }
@@ -133,7 +167,9 @@ class Service {
   deleteUser(id) {
     this.require('admin');
     if (id === this.user.id) throw new AppError('cannot_delete_self');
+    const u = this.db.get('SELECT username FROM users WHERE id = ?', [id]);
     this.db.run('DELETE FROM users WHERE id = ?', [id]);
+    if (u) { this.hook('onUserDeleted', u.username); this.db.save(); }
     this.audit('delete', 'user', id);
     return true;
   }
