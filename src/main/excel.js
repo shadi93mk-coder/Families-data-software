@@ -9,25 +9,25 @@ const { AppError } = require('./service');
 const FAMILY_COLS = [
   { key: 'file_no', ar: 'رقم الملف', en: 'File No', hy: 'Գործի համար' },
   { key: 'head_name', ar: 'اسم رب الأسرة', en: 'Head of family', hy: 'Ընտանիքի ղեկավար' },
-  { key: 'head_national_id', ar: 'الرقم الوطني', en: 'National ID', hy: 'Ազգային համար' },
+  { key: 'head_national_id', ar: 'الرقم الوطني', en: 'National ID', hy: 'Անձնական համար' },
   { key: 'head_birth_date', ar: 'تاريخ الميلاد', en: 'Birth date', hy: 'Ծննդյան ամսաթիվ' },
   { key: 'head_gender', ar: 'الجنس', en: 'Gender', hy: 'Սեռ' },
-  { key: 'phone', ar: 'الهاتف', en: 'Phone', hy: 'Հեռախոս' },
-  { key: 'area', ar: 'المنطقة', en: 'Area', hy: 'Տարածք' },
+  { key: 'phone', ar: 'الهاتف', en: 'Phone', hy: 'Հեռախոսահամար' },
+  { key: 'area', ar: 'المنطقة', en: 'Area', hy: 'Շրջան' },
   { key: 'address', ar: 'العنوان', en: 'Address', hy: 'Հասցե' },
   { key: 'notes', ar: 'ملاحظات', en: 'Notes', hy: 'Նշումներ' },
 ];
 
 const MEMBER_COLS = [
   { key: 'file_no', ar: 'رقم الملف', en: 'File No', hy: 'Գործի համար' },
-  { key: 'full_name', ar: 'الاسم الكامل', en: 'Full name', hy: 'Անուն ազգանուն' },
-  { key: 'national_id', ar: 'الرقم الوطني', en: 'National ID', hy: 'Ազգային համար' },
+  { key: 'full_name', ar: 'الاسم الكامل', en: 'Full name', hy: 'Անուն, ազգանուն' },
+  { key: 'national_id', ar: 'الرقم الوطني', en: 'National ID', hy: 'Անձնական համար' },
   { key: 'birth_date', ar: 'تاريخ الميلاد', en: 'Birth date', hy: 'Ծննդյան ամսաթիվ' },
   { key: 'gender', ar: 'الجنس', en: 'Gender', hy: 'Սեռ' },
-  { key: 'relation', ar: 'صلة القرابة', en: 'Relation', hy: 'Ազգակցություն' },
+  { key: 'relation', ar: 'صلة القرابة', en: 'Relation', hy: 'Ազգակցական կապ' },
   { key: 'has_disability', ar: 'إعاقة', en: 'Disability', hy: 'Հաշմանդամություն' },
   { key: 'chronic_illness', ar: 'مرض مزمن', en: 'Chronic illness', hy: 'Քրոնիկ հիվանդություն' },
-  { key: 'occupation', ar: 'العمل/الدراسة', en: 'Occupation', hy: 'Զբաղմունք' },
+  { key: 'occupation', ar: 'العمل/الدراسة', en: 'Occupation', hy: 'Աշխատանք / ուսում' },
   { key: 'notes', ar: 'ملاحظات', en: 'Notes', hy: 'Նշումներ' },
 ];
 
@@ -72,7 +72,7 @@ function parseDate(v) {
 function familyRows(service, ids, lang) {
   const criteria = service.listCriteria(false);
   const famHeader = [...FAMILY_COLS.map(c => c[lang]), ...criteria.map(c => criterionLabel(c, lang)),
-    { ar: 'عدد الأفراد', en: 'Members', hy: 'Անդամների թիվ' }[lang], { ar: 'النقاط', en: 'Score', hy: 'Միավորներ' }[lang]];
+    { ar: 'عدد الأفراد', en: 'Members', hy: 'Անդամների թիվը' }[lang], { ar: 'النقاط', en: 'Score', hy: 'Միավորներ' }[lang]];
   const fam = [famHeader];
   const mem = [MEMBER_COLS.map(c => c[lang])];
   const rowsById = new Map(service.buildRows('active').concat(service.buildRows('archived')).map(r => [r.id, r]));

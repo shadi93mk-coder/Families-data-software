@@ -56,10 +56,10 @@ class Service {
     const a = this.db.get('SELECT COUNT(*) AS n FROM aid_types').n;
     if (a === 0) {
       const defaults = [
-        ['مبلغ مالي', 'Cash', 'Դրամական օգնություն', 'SYP'],
+        ['مبلغ مالي', 'Cash', 'Դրամական աջակցություն', 'SYP'],
         ['كوبون', 'Voucher', 'Կտրոն', ''],
-        ['سلة غذائية', 'Food basket', 'Սննդի զամբյուղ', ''],
-        ['سلة صحية', 'Hygiene kit', 'Հիգիենայի հավաքածու', ''],
+        ['سلة غذائية', 'Food basket', 'Սննդի փաթեթ', ''],
+        ['سلة صحية', 'Hygiene kit', 'Հիգիենայի պարագաների փաթեթ', ''],
       ];
       for (const d of defaults) this.db.run('INSERT INTO aid_types(name_ar,name_en,name_hy,unit) VALUES(?,?,?,?)', d);
     }
