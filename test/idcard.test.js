@@ -52,3 +52,14 @@ test('older database files get the new ID columns', async () => {
   for (const c of ['father_name', 'mother_name', 'birth_place']) assert.ok(cols('members').includes(c), c);
   assert.strictEqual(db.get('SELECT head_name FROM families').head_name, 'x');
 });
+
+test('keyboard-mode scanner that drops Arabic letters: national number and birth date are kept', () => {
+  // what such a scanner types: Arabic and the separators before them are lost, ASCII survives
+  const typed = '5-3-1988#01234567890#L”,0$ Z W<e.p+x%9,}H}jUSO+h@H4”-|-_aZjp:q#gcKaUV;$~cTv9(re32}0dqVPR50cR|kctNwcgCCg';
+  const r = id.parseScannedText(typed);
+  assert.strictEqual(r.partial, true);
+  assert.strictEqual(r.national_id, '01234567890');
+  assert.strictEqual(r.birth_date, '1988-03-05');
+  assert.strictEqual(r.full_name, '');
+  assert.strictEqual(id.parseScannedText('5-3-1988#123#'), null, 'national number must be 11 digits');
+});

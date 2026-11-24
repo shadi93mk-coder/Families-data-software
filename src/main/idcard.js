@@ -82,7 +82,23 @@ function parseScannedText(text) {
   const direct = parseFields(text);
   if (direct) return direct;
   const bytes = latinTextToBytes(text);
-  return bytes ? parseBytes(bytes) : null;
+  const viaBytes = bytes ? parseBytes(bytes) : null;
+  return viaBytes || parsePartial(text);
+}
+
+/**
+ * Many scanners in keyboard mode cannot "type" Arabic letters and silently drop them: only
+ * "<d-m-yyyy>#<national number>#<binary>" arrives. Keep what is usable (national number, birth date).
+ */
+function parsePartial(text) {
+  const m = /(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\s*#\s*(\d{11})(?!\d)/.exec(String(text));
+  if (!m) return null;
+  return {
+    partial: true,
+    first_name: '', family_name: '', full_name: '', father_name: '', mother_name: '', birth_place: '',
+    birth_date: toIsoDate(m[1], m[2], m[3]),
+    national_id: m[4],
+  };
 }
 
 // ------------------------------------------------------------------ photo decoding
@@ -150,4 +166,4 @@ async function decodeImage(render, originalWidth) {
   return null;
 }
 
-module.exports = { parseFields, parseBytes, parseScannedText, decode1256, latinTextToBytes, decodeImage };
+module.exports = { parseFields, parseBytes, parseScannedText, parsePartial, decode1256, latinTextToBytes, decodeImage };

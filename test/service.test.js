@@ -124,3 +124,10 @@ test('ID card fields are stored for head and members', async () => {
   assert.strictEqual(s.searchFamilies({ search: 'ليلى' }).length, 1);
   assert.strictEqual(s.searchFamilies({ conditions: [{ field: 'head_birth_place', op: 'equals', value: 'دمشق' }] }).length, 1);
 });
+
+test('member without a name is rejected instead of silently dropped', async () => {
+  const { s } = await setup();
+  assert.throws(() => s.saveFamily({ head_name: 'x', members: [{ full_name: '', national_id: '01234567890' }] }), e => e.code === 'member_name_required');
+  const id = s.saveFamily({ head_name: 'x', members: [{ full_name: '' }, { full_name: 'y' }] });
+  assert.strictEqual(s.getFamily(id).members.length, 1, 'completely empty rows are ignored');
+});

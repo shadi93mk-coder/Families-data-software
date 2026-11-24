@@ -320,7 +320,8 @@ class Service {
       const dup = this.db.get('SELECT id FROM families WHERE file_no = ? AND id != ?', [fileNo, f.id || 0]);
       if (dup) throw new AppError('file_no_exists');
     }
-    const members = (f.members || []).filter(m => str(m.full_name));
+    const members = (f.members || []).filter(m => str(m.full_name) || str(m.national_id));
+    if (members.some(m => !str(m.full_name))) throw new AppError('member_name_required');
     return this.db.tx(() => {
       const base = [str(f.head_name), str(f.head_national_id), str(f.head_birth_date), str(f.head_gender),
         str(f.phone), str(f.area), str(f.address), str(f.notes), JSON.stringify(custom),

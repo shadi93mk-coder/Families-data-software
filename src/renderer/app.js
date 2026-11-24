@@ -681,10 +681,13 @@
           const r = await scanIdDialog();
           if (!r) return;
           const d = r.fields;
+          // a partial read (scanner dropped the Arabic letters) must not erase what was typed already
+          const keep = (v, old) => (v ? v : old);
           if (r.target === 'head') {
             Object.assign(f, {
-              head_name: d.full_name, head_national_id: d.national_id, head_birth_date: d.birth_date || f.head_birth_date,
-              head_father_name: d.father_name, head_mother_name: d.mother_name, head_birth_place: d.birth_place,
+              head_name: keep(d.full_name, f.head_name), head_national_id: d.national_id, head_birth_date: keep(d.birth_date, f.head_birth_date),
+              head_father_name: keep(d.father_name, f.head_father_name), head_mother_name: keep(d.mother_name, f.head_mother_name),
+              head_birth_place: keep(d.birth_place, f.head_birth_place),
             });
           } else {
             f.members.push({ full_name: d.full_name, national_id: d.national_id, birth_date: d.birth_date, father_name: d.father_name,
@@ -692,7 +695,7 @@
           }
           state.dirty = true;
           state.params = { ...state.params, draft: f };
-          toast(t('id.filled'), 'ok');
+          toast(d.partial ? t('id.partial_filled') : t('id.filled'), d.partial ? '' : 'ok');
           renderShell();
         },
       }, '🪪 ', t('family.scan_id')),
@@ -852,7 +855,8 @@
         const dups = await safe(() => api('findByNationalId', d.national_id, state.params.id || 0)) || [];
         const row = (k, v) => h('tr', null, h('th', { style: { width: '35%' } }, t(k)), h('td', null, v || '—'));
         resultBox.appendChild(h('div', { class: 'panel', style: { marginTop: '12px', marginBottom: 0 } },
-          h('h3', null, '✅ ', t('id.result')),
+          h('h3', null, d.partial ? '⚠️ ' : '✅ ', t('id.result')),
+          d.partial ? h('div', { class: 'alert warn' }, t('id.partial')) : null,
           dups.length ? h('div', { class: 'alert warn' }, t('family.dup_warning'), ' ', dups.map(x => `#${x.file_no} ${x.head_name}`).join(' · ')) : null,
           h('table', null, h('tbody', null,
             row('id.first_name', d.first_name), row('id.family_name', d.family_name), row('f.head_father_name', d.father_name),
